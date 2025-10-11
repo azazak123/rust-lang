@@ -259,4 +259,34 @@ impl Expr {
             _ => format!("{:?}", self),
         }
     }
+
+    /// Extract variable names from an expression (simple traversal).
+    pub fn extract_vars(&self) -> Vec<String> {
+        match self {
+            Expr::Var(name) => vec![name.clone()],
+            Expr::Unary(_, inner) => inner.extract_vars(),
+            Expr::Binary(l, _, r) => {
+                let mut v = l.extract_vars();
+                v.extend(r.extract_vars());
+                v
+            }
+            Expr::MapExpr(_, a, b) | Expr::FilterExpr(_, a, b) => {
+                let mut v = a.extract_vars();
+                v.extend(b.extract_vars());
+                v
+            }
+            Expr::ScanlExpr(_, a, _, b, c) | Expr::FoldlExpr(_, a, _, b, c) => {
+                let mut v = a.extract_vars();
+                v.extend(b.extract_vars());
+                v.extend(c.extract_vars());
+                v
+            }
+            Expr::Range(a, b) => {
+                let mut v = a.extract_vars();
+                v.extend(b.extract_vars());
+                v
+            }
+            _ => vec![],
+        }
+    }
 }

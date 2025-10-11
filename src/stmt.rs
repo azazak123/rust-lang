@@ -2,6 +2,7 @@ use crate::expr::Expr;
 use crate::parser::Parser;
 use crate::token::TokenType;
 use std::collections::HashMap;
+use std::default;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -14,10 +15,12 @@ pub enum Stmt {
     For(String, Expr, Box<Stmt>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Decl {
     VarDecl(String, Expr, Mutability),
     Stmt(Stmt),
+    #[default]
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

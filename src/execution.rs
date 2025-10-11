@@ -13,7 +13,6 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
                 return Err("Error evaluating expression".to_string());
             }
         }
-
         Decl::VarDecl(name, expr, _mutability) => {
             if let Some(val) = expr.eval(env) {
                 env_declare(env, name.clone(), val);
@@ -21,7 +20,6 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
                 return Err(format!("Error: cannot evaluate {}", name));
             }
         }
-
         Decl::Stmt(Stmt::Assign(name, expr)) => {
             if let Some(val) = expr.eval(env) {
                 if !env_assign(env, name, val) {
@@ -31,7 +29,6 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
                 return Err(format!("Error: cannot evaluate {}", name));
             }
         }
-
         Decl::Stmt(Stmt::Block(stmts)) => {
             env_add_scope(env, HashMap::new());
             for stmt in stmts {
@@ -39,7 +36,6 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
             }
             env_remove_scope(env);
         }
-
         Decl::Stmt(Stmt::Condition(cond, then_stmt, else_stmt)) => {
             if let Some(Expr::Bool(b)) = cond.eval(env) {
                 if b {
@@ -51,14 +47,12 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
                 return Err("Error: condition must be boolean".to_string());
             }
         }
-
         Decl::Stmt(Stmt::While(cond, body)) => {
             let body = &Decl::Stmt(*body.clone());
             while let Some(Expr::Bool(true)) = cond.eval(env) {
                 execute_stmt(body, env)?;
             }
         }
-
         Decl::Stmt(Stmt::For(var, arr_expr, body)) => {
             let body = &Decl::Stmt(*body.clone());
             if let Some(Expr::Array(arr)) = arr_expr.eval(env) {
@@ -75,8 +69,8 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
                 return Err("Error: for loop requires array".to_string());
             }
         }
-
         Decl::Stmt(Stmt::Expression(_)) => {}
+        Decl::None => unreachable!(),
     }
 
     Ok(())

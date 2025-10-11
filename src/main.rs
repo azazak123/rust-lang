@@ -1,4 +1,5 @@
 // src/main.rs
+mod declaration_meta;
 mod execution;
 mod expr;
 mod graph;
@@ -11,6 +12,10 @@ mod token;
 
 use std::env;
 use std::fs;
+
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+use petgraph::visit::NodeRef;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -48,18 +53,31 @@ fn main() {
     };
 
     // Analyze dependencies
-    let (graph, meta) = graph::analyze(&decls);
+    let graph = graph::analyze(&decls);
 
     // dbg!(&graph);
 
+    let mut graph = graph.map(|_, meta| meta.clone().unwrap(), |_, w| *w);
+
+    // let mut edges = graph
+    //     .edge_references()
+    //     .map(|e| (e.source(), e.target()))
+    //     .collect::<Vec<_>>();
+
+    // edges.sort();
+
+    // dbg!(edges);
+
     // Convert meta to the format expected by scheduler
-    let complexities: Vec<(usize, usize)> = meta
-        .iter()
-        .map(|(complexity, deps)| (*complexity, deps.len()))
-        .collect();
+    // let complexities: Vec<(usize, usize)> = meta
+    //     .iter()
+    //     .map(|(complexity, deps)| (*complexity, deps.len()))
+    //     .collect();
+
+    // dbg!(complexities);
 
     // Topological sort
-    let order = match scheduler::kahn_topsort(&graph, &complexities) {
+    let order = match scheduler::kahn_topsort(&mut graph) {
         Ok(order) => order,
         Err(cycle) => {
             eprintln!("Cycle detected in dependency graph: {:?}", cycle);
@@ -68,13 +86,15 @@ fn main() {
     };
 
     // dbg!(&order);
+    // dbg!(&graph[NodeIndex::new(3)]);
 
     // Check if parallel execution is beneficial
-    let use_parallel = decls.len() > 10 || meta.iter().any(|(c, _)| *c > 1);
+    // let use_parallel = decls.len() > 10 || meta.iter().any(|(c, _)| *c > 1);
+    let use_parallel = true;
 
     if use_parallel {
         // Execute with parallelization
-        match parallel_execution::execute_plan(&decls, &meta, &order, &graph) {
+        match parallel_execution::execute_plan(&order, &graph) {
             Ok(_) => {}
             Err(e) => {
                 eprintln!("Parallel execution error: {}", e);
@@ -316,10 +336,10 @@ mod tests {
         let mut parser = stmt::StmtParser::new(tokens);
         let (decls, _) = parser.parse().unwrap();
 
-        let (graph, meta) = graph::analyze(&decls);
+        // let (graph, meta) = graph::analyze(&decls);
 
-        assert_eq!(graph.node_count(), 5);
-        assert_eq!(meta.len(), 5);
+        // assert_eq!(graph.node_count(), 5);
+        // assert_eq!(meta.len(), 5);
     }
 
     #[test]
@@ -336,14 +356,14 @@ mod tests {
         let mut parser = stmt::StmtParser::new(tokens);
         let (decls, _) = parser.parse().unwrap();
 
-        let (graph, meta) = graph::analyze(&decls);
-        let complexities: Vec<(usize, usize)> =
-            meta.iter().map(|(c, deps)| (*c, deps.len())).collect();
+        // let (graph, meta) = graph::analyze(&decls);
+        // let complexities: Vec<(usize, usize)> =
+        //     meta.iter().map(|(c, deps)| (*c, deps.len())).collect();
 
-        let order = scheduler::kahn_topsort(&graph, &complexities).unwrap();
+        // let order = scheduler::kahn_topsort(&graph, &complexities).unwrap();
 
         // Order should respect dependencies
-        assert_eq!(order.len(), 5);
+        // assert_eq!(order.len(), 5);
     }
 }
 

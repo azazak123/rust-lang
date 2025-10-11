@@ -1,21 +1,39 @@
-use petgraph::graph::DiGraph;
+use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-pub fn kahn_topsort(
-    graph: &DiGraph<(), ()>,
-    complexities: &[(usize, usize)],
-) -> Result<Vec<usize>, Vec<usize>> {
+use crate::declaration_meta::{Class, DeclarationMeta};
+use crate::stmt::{Decl, Stmt};
+
+pub fn kahn_topsort(graph: &mut DiGraph<DeclarationMeta, ()>) -> Result<Vec<usize>, Vec<usize>> {
     let mut in_degree: HashMap<usize, usize> = HashMap::new();
     let mut result = Vec::new();
 
+    let mut blacklisted = HashSet::new();
+
+    // let g_clone = graph.clone();
+
+    for edge in graph.edge_references() {
+        let target = edge.target();
+        if target.index() <= edge.source().index() || graph[edge.source()].class == Class::Loop {
+            blacklisted.insert(target.index());
+        }
+    }
+
     // Calculate in-degrees
-    for node in graph.node_indices() {
-        in_degree.insert(node.index(), 0);
+    for node in graph.node_indices().map(|n| n.index()) {
+        if blacklisted.contains(&node) {
+            continue;
+        }
+        in_degree.insert(node, 0);
     }
 
     for edge in graph.edge_references() {
         let target = edge.target();
+        let source = edge.source();
+        if blacklisted.contains(&target.index()) || blacklisted.contains(&source.index()) {
+            continue;
+        }
         *in_degree.entry(target.index()).or_insert(0) += 1;
     }
 
@@ -24,11 +42,7 @@ pub fn kahn_topsort(
         .iter()
         .filter(|(_, &deg)| deg == 0)
         .map(|(&node, _)| {
-            let complexity = if node < complexities.len() {
-                complexities[node].0
-            } else {
-                0
-            };
+            let complexity = graph[NodeIndex::new(node)].complexity;
             (node, complexity)
         })
         .collect();
@@ -46,14 +60,14 @@ pub fn kahn_topsort(
             // Reduce in-degree for neighbors
             for edge in graph.edges(node_idx) {
                 let target = edge.target().index();
+                if blacklisted.contains(&target) {
+                    continue;
+                }
                 if let Some(deg) = in_degree.get_mut(&target) {
+                    // dbg!(*deg, target);
                     *deg = deg.saturating_sub(1);
                     if *deg == 0 {
-                        let complexity = if target < complexities.len() {
-                            complexities[target].0
-                        } else {
-                            0
-                        };
+                        let complexity = graph[NodeIndex::new(target)].complexity;
 
                         // Insert in sorted order
                         let pos = queue
@@ -67,6 +81,39 @@ pub fn kahn_topsort(
         }
 
         in_degree.remove(&node);
+    }
+
+    let set = result.iter().copied().collect::<HashSet<_>>();
+
+    {
+        for i in graph.node_indices().rev() {
+            let mut decl = std::mem::take(&mut graph[i]);
+
+            let block = match &mut decl.decl {
+                Decl::Stmt(Stmt::For(_, _, block)) => block,
+                Decl::Stmt(Stmt::While(_, block)) => block,
+                _ => {
+                    graph[i] = decl;
+                    continue;
+                }
+            };
+
+            let Stmt::Block(stmts) = block.as_mut() else {
+                unreachable!();
+            };
+
+            let mut j = decl.loops_decls_indexes[0];
+            while j <= decl.loops_decls_indexes[decl.loops_decls_indexes.len() - 1] {
+                if !set.contains(&j) {
+                    // читаємо graph іммутабельно — вже дозволено, бо decl тепер не позичений
+                    let other = &graph[NodeIndex::new(j)];
+                    stmts.push(other.decl.clone());
+                }
+                j += graph[NodeIndex::new(j)].loops_decls_indexes.len() + 1;
+            }
+
+            graph[i] = decl;
+        }
     }
 
     if in_degree.is_empty() {

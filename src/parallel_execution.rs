@@ -1,3 +1,4 @@
+use crate::declaration_meta::DeclarationMeta;
 use crate::execution::execute_stmt;
 use crate::expr::Expr;
 use crate::graph::Meta;
@@ -13,21 +14,28 @@ use std::thread;
 /// Паралельне виконання графа задач із залежностями.
 /// Повний аналог функції `executePlan` з Haskell.
 pub fn execute_plan(
-    decls: &[Decl],
-    meta: &Meta,
     order: &[usize],
-    graph: &DiGraph<(), ()>,
+    graph: &DiGraph<DeclarationMeta, ()>,
 ) -> Result<Vec<Env>, String> {
     let results: Arc<RwLock<HashMap<usize, Env>>> = Arc::new(RwLock::new(HashMap::new()));
 
     thread::scope(|s| {
         for &task_id in order {
-            let decl = decls
-                .get(task_id)
-                .ok_or_else(|| format!("Invalid decl index {}", task_id))?;
-            let (_, deps_meta) = meta
-                .get(task_id)
-                .ok_or_else(|| format!("Invalid meta index {}", task_id))?;
+            // let decl = decls
+            //     .get(task_id)
+            //     .ok_or_else(|| format!("Invalid decl index {}", task_id))?;
+            let DeclarationMeta {
+                index: _,
+                complexity: _,
+                mut_deps: deps_meta,
+                class: _,
+                decl,
+                loops_decls_indexes: _,
+            } = &graph[NodeIndex::new(task_id)];
+            // .get(task_id)
+            // .ok_or_else(|| format!("Invalid meta index {}", task_id))?;
+
+            // dbg!(decl);
 
             let results_clone = Arc::clone(&results);
 
@@ -99,6 +107,7 @@ fn parallel_for(var: String, arr_expr: &Expr, block: &Stmt, env: &Env) -> Result
                 let mut scope = HashMap::new();
                 scope.insert(var.clone(), el.clone());
                 env_add_scope(&mut local_env, scope);
+                // dbg!(&body);
                 let _ = execute_stmt(body, &mut local_env)?;
                 env_remove_scope(&mut local_env);
                 Ok(local_env)
@@ -109,7 +118,7 @@ fn parallel_for(var: String, arr_expr: &Expr, block: &Stmt, env: &Env) -> Result
         let res = results
             .into_iter()
             .next()
-            .unwrap_or_else(|| Ok(env.to_vec()))?;
+            .unwrap_or_else(|| Ok(env.clone()))?;
 
         Ok(res)
     } else {
