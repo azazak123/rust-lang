@@ -1,5 +1,7 @@
+use rustc_hash::FxHashMap as HashMap;
+
 use crate::expr::Expr;
-use std::{cmp::max, collections::HashMap};
+
 pub type Env = Vec<HashMap<String, Expr>>;
 
 pub fn env_empty() -> Env {
@@ -27,7 +29,7 @@ pub fn env_remove_scope(env: &mut Env) {
 
 pub fn env_declare(env: &mut Env, name: String, val: Expr) {
     if env.is_empty() {
-        env.push(HashMap::new());
+        env.push(HashMap::default());
     }
 
     let last_index = env.len() - 1;
@@ -49,7 +51,7 @@ pub fn merge_scope((id1, x): (usize, &Env), (id2, y): (usize, &Env)) -> (usize, 
     let mut merged = Vec::with_capacity(max_len);
 
     for i in 0..max_len {
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         let scope_x = x.get(i);
         let scope_y = y.get(i);
 
@@ -79,7 +81,7 @@ pub fn merge_scope((id1, x): (usize, &Env), (id2, y): (usize, &Env)) -> (usize, 
         merged.push(map);
     }
 
-    (max(id1, id2), merged)
+    (id1.max(id2), merged)
 }
 
 pub fn create_env(dep_results: Vec<Env>, dep_ids: Vec<usize>) -> Env {

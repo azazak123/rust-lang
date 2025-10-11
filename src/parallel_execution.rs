@@ -1,29 +1,29 @@
+use parking_lot::{Condvar, Mutex};
+use petgraph::{
+    graph::{DiGraph, NodeIndex},
+    visit::EdgeRef,
+};
+use rayon::prelude::*;
+use rustc_hash::FxHashMap as HashMap;
+use std::{sync::Arc, thread};
+
 use crate::declaration_meta::DeclarationMeta;
 use crate::execution::execute_stmt;
 use crate::expr::Expr;
-use crate::graph::Meta;
 use crate::scope::*;
 use crate::stmt::{Decl, Stmt};
-use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::EdgeRef;
-use rayon::prelude::*;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::thread;
 
-/// Паралельне виконання графа задач із залежностями.
-/// Повний аналог функції `executePlan` з Haskell.
+/// Паралельне виконання графа задач із залежностями (оптимізовано)
 pub fn execute_plan(
     order: &[usize],
     graph: &DiGraph<DeclarationMeta, ()>,
 ) -> Result<Vec<Env>, String> {
-    let results: Arc<RwLock<HashMap<usize, Env>>> = Arc::new(RwLock::new(HashMap::new()));
+    let results: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<usize, Env>>> =
+        Arc::new(Mutex::new(HashMap::default()));
+    let cv = Arc::new(Condvar::new());
 
     thread::scope(|s| {
         for &task_id in order {
-            // let decl = decls
-            //     .get(task_id)
-            //     .ok_or_else(|| format!("Invalid decl index {}", task_id))?;
             let DeclarationMeta {
                 index: _,
                 complexity: _,
@@ -32,42 +32,41 @@ pub fn execute_plan(
                 decl,
                 loops_decls_indexes: _,
             } = &graph[NodeIndex::new(task_id)];
-            // .get(task_id)
-            // .ok_or_else(|| format!("Invalid meta index {}", task_id))?;
 
-            // dbg!(decl);
+            let results_clone: Arc<
+                parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<usize, Env>>,
+            > = Arc::clone(&results);
+            let cv_clone = Arc::clone(&cv);
 
-            let results_clone = Arc::clone(&results);
-
-            // Запускаємо кожне завдання в окремому потоці
             s.spawn(move || {
                 let node_idx = NodeIndex::new(task_id);
 
-                // Знайти всі залежності (preSet)
+                // Знайти всі залежності
                 let dep_ids: Vec<usize> = graph
                     .edges_directed(node_idx, petgraph::Direction::Incoming)
                     .map(|e| e.source().index())
                     .collect();
 
-                // Очікуємо на завершення усіх залежностей
+                // Очікуємо на залежності
                 let dep_results: Vec<Env> = dep_ids
                     .iter()
                     .map(|&dep_id| loop {
-                        if let Some(env) = results_clone.read().unwrap().get(&dep_id) {
+                        let mut guard = results_clone.lock();
+                        if let Some(env) = guard.get(&dep_id) {
                             return env.clone();
                         }
-                        thread::sleep(std::time::Duration::from_millis(1));
+                        cv_clone.wait(&mut guard);
                     })
                     .collect();
 
                 // Створюємо середовище
                 let mut env = create_env(dep_results, dep_ids);
 
-                // Виконання самого завдання
+                // Виконання завдання
                 let res_env = if deps_meta.is_empty() {
                     match &decl {
                         Decl::Stmt(Stmt::For(var, arr_expr, body)) => {
-                            parallel_for(var.clone(), arr_expr, body, &env)
+                            parallel_for_optimized(var.clone(), arr_expr, body, &env)
                         }
                         _ => execute_stmt(&decl, &mut env)
                             .map_err(|e| format!("Execution error: {}", e))
@@ -80,47 +79,54 @@ pub fn execute_plan(
                 };
 
                 if let Ok(final_env) = res_env {
-                    results_clone.write().unwrap().insert(task_id, final_env);
+                    results_clone.lock().insert(task_id, final_env);
+                    cv_clone.notify_all();
                 }
             });
         }
 
-        return Result::<(), String>::Ok(());
+        Result::<(), String>::Ok(())
     })?;
 
-    // Повертаємо результати в порядку order
-    let final_results = results.read().unwrap();
+    let final_results = results.lock();
     Ok(order
         .iter()
         .filter_map(|&id| final_results.get(&id).cloned())
         .collect())
 }
 
-/// Паралельне виконання циклу `For`, аналог `parallelFor` з Haskell
-fn parallel_for(var: String, arr_expr: &Expr, block: &Stmt, env: &Env) -> Result<Env, String> {
-    let body = &Decl::Stmt(block.clone());
+/// Оптимізована паралельна версія For
+fn parallel_for_optimized(
+    var: String,
+    arr_expr: &Expr,
+    block: &Stmt,
+    env: &Env,
+) -> Result<Env, String> {
     if let Some(Expr::Array(arr)) = arr_expr.eval(&env) {
-        let results = arr
+        if arr.is_empty() {
+            return Ok(env.clone());
+        }
+
+        let body = Decl::Stmt(block.clone());
+
+        let results: Vec<Result<Env, String>> = arr
             .par_iter()
             .map(|el| {
                 let mut local_env = env.clone();
-                let mut scope = HashMap::new();
+                let mut scope = HashMap::default();
                 scope.insert(var.clone(), el.clone());
                 env_add_scope(&mut local_env, scope);
-                // dbg!(&body);
-                let _ = execute_stmt(body, &mut local_env)?;
+
+                let _ = execute_stmt(&body, &mut local_env)?;
                 env_remove_scope(&mut local_env);
                 Ok(local_env)
             })
-            .collect::<Vec<Result<Env, String>>>();
+            .collect();
 
-        // Аналог `head envs` у Haskell
-        let res = results
+        results
             .into_iter()
             .next()
-            .unwrap_or_else(|| Ok(env.clone()))?;
-
-        Ok(res)
+            .unwrap_or_else(|| Ok(env.clone()))
     } else {
         Err("For only works on arrays".into())
     }

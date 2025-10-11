@@ -1,8 +1,8 @@
-// src/execution.rs
+use rustc_hash::FxHashMap as HashMap;
+
 use crate::expr::Expr;
 use crate::scope::*;
 use crate::stmt::{Decl, Stmt};
-use std::collections::HashMap;
 
 pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
     match decl {
@@ -30,7 +30,7 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
             }
         }
         Decl::Stmt(Stmt::Block(stmts)) => {
-            env_add_scope(env, HashMap::new());
+            env_add_scope(env, HashMap::default());
             for stmt in stmts {
                 execute_stmt(stmt, env)?;
             }
@@ -57,7 +57,7 @@ pub fn execute_stmt(decl: &Decl, env: &mut Env) -> Result<(), String> {
             let body = &Decl::Stmt(*body.clone());
             if let Some(Expr::Array(arr)) = arr_expr.eval(env) {
                 for val in arr {
-                    let mut scope = HashMap::new();
+                    let mut scope = HashMap::default();
                     scope.insert(var.clone(), val);
                     env_add_scope(env, scope);
 

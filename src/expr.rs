@@ -1,5 +1,4 @@
-// src/expr.rs
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::scope::*;
 
@@ -160,11 +159,11 @@ impl Expr {
                 let Expr::Array(arr) = arr_expr.eval(env)? else {
                     return None;
                 };
-                let mut results = Vec::new();
+                let mut results = Vec::with_capacity(arr.len());
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::new();
+                    let mut scope = HashMap::default();
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);
 
@@ -182,7 +181,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::new();
+                    let mut scope = HashMap::default();
                     scope.insert(var.clone(), val.clone());
                     env_add_scope(&mut new_env, scope);
 
@@ -205,7 +204,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::new();
+                    let mut scope = HashMap::default();
                     scope.insert(acc_name.clone(), acc);
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);
@@ -225,7 +224,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::new();
+                    let mut scope = HashMap::default();
                     scope.insert(acc_name.clone(), acc);
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);
