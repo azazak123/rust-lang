@@ -3,7 +3,7 @@ use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::declaration_meta::{Class, DeclarationMeta};
-use crate::stmt::{Decl, Stmt};
+use crate::stmt::{DeclType, Stmt};
 
 pub fn kahn_topsort(graph: &mut DiGraph<DeclarationMeta, ()>) -> Result<Vec<usize>, Vec<usize>> {
     let mut in_degree: HashMap<usize, usize> = HashMap::new();
@@ -83,38 +83,38 @@ pub fn kahn_topsort(graph: &mut DiGraph<DeclarationMeta, ()>) -> Result<Vec<usiz
         in_degree.remove(&node);
     }
 
-    let set = result.iter().copied().collect::<HashSet<_>>();
+    // let set = result.iter().copied().collect::<HashSet<_>>();
 
-    {
-        for i in graph.node_indices().rev() {
-            let mut decl = std::mem::take(&mut graph[i]);
+    // {
+    //     for i in graph.node_indices().rev() {
+    //         let mut decl = std::mem::take(&mut graph[i]);
 
-            let block = match &mut decl.decl {
-                Decl::Stmt(Stmt::For(_, _, block)) => block,
-                Decl::Stmt(Stmt::While(_, block)) => block,
-                _ => {
-                    graph[i] = decl;
-                    continue;
-                }
-            };
+    //         let block = match &mut decl.decl {
+    //             DeclType::Stmt(Stmt::For(_, _, block)) => block,
+    //             DeclType::Stmt(Stmt::While(_, block)) => block,
+    //             _ => {
+    //                 graph[i] = decl;
+    //                 continue;
+    //             }
+    //         };
 
-            let Stmt::Block(stmts) = block.as_mut() else {
-                unreachable!();
-            };
+    //         let Stmt::Block(stmts) = block.as_mut() else {
+    //             unreachable!();
+    //         };
 
-            let mut j = decl.loops_decls_indexes[0];
-            while j <= decl.loops_decls_indexes[decl.loops_decls_indexes.len() - 1] {
-                if !set.contains(&j) {
-                    // читаємо graph іммутабельно — вже дозволено, бо decl тепер не позичений
-                    let other = &graph[NodeIndex::new(j)];
-                    stmts.push(other.decl.clone());
-                }
-                j += graph[NodeIndex::new(j)].loops_decls_indexes.len() + 1;
-            }
+    //         let mut j = decl.loops_decls_indexes[0];
+    //         while j <= decl.loops_decls_indexes[decl.loops_decls_indexes.len() - 1] {
+    //             if !set.contains(&j) {
+    //                 // читаємо graph іммутабельно — вже дозволено, бо decl тепер не позичений
+    //                 let other = &graph[NodeIndex::new(j)];
+    //                 stmts.push(other.decl.clone());
+    //             }
+    //             j += graph[NodeIndex::new(j)].loops_decls_indexes.len() + 1;
+    //         }
 
-            graph[i] = decl;
-        }
-    }
+    //         graph[i] = decl;
+    //     }
+    // }
 
     if in_degree.is_empty() {
         Ok(result)

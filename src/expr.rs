@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap as HashMap};
 
 use crate::scope::*;
 
@@ -163,7 +163,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::default();
+                    let mut scope = env_create_scope();
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);
 
@@ -181,7 +181,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::default();
+                    let mut scope = env_create_scope();
                     scope.insert(var.clone(), val.clone());
                     env_add_scope(&mut new_env, scope);
 
@@ -204,7 +204,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::default();
+                    let mut scope = env_create_scope();
                     scope.insert(acc_name.clone(), acc);
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);
@@ -224,7 +224,7 @@ impl Expr {
 
                 for val in arr {
                     let mut new_env = env.clone();
-                    let mut scope = HashMap::default();
+                    let mut scope = env_create_scope();
                     scope.insert(acc_name.clone(), acc);
                     scope.insert(var.clone(), val);
                     env_add_scope(&mut new_env, scope);

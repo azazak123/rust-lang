@@ -1,4 +1,3 @@
-// src/main.rs
 mod declaration_meta;
 mod execution;
 mod expr;
@@ -7,6 +6,7 @@ mod parallel_execution;
 mod parser;
 mod scheduler;
 mod scope;
+mod stat_manager;
 mod stmt;
 mod token;
 
@@ -55,7 +55,7 @@ fn main() {
     // Analyze dependencies
     let graph = graph::analyze(&decls);
 
-    // dbg!(&graph);
+    // dbg!(&graph[NodeIndex::new(3)]);
 
     let mut graph = graph.map(|_, meta| meta.clone().unwrap(), |_, w| *w);
 
@@ -90,6 +90,10 @@ fn main() {
 
     // Check if parallel execution is beneficial
     // let use_parallel = decls.len() > 10 || meta.iter().any(|(c, _)| *c > 1);
+
+    // let stat_manager = stat_manager::StatManager::new(graph.node_count());
+    // stat_manager.run();
+
     let use_parallel = true;
 
     if use_parallel {
@@ -115,6 +119,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[test]

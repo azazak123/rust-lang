@@ -4,14 +4,14 @@ use petgraph::{
     visit::EdgeRef,
 };
 use rayon::prelude::*;
-use rustc_hash::FxHashMap as HashMap;
-use std::{sync::Arc, thread};
+use rustc_hash::{FxBuildHasher, FxHashMap as HashMap};
+use std::{ops::Deref, sync::Arc, thread};
 
-use crate::declaration_meta::DeclarationMeta;
 use crate::execution::execute_stmt;
 use crate::expr::Expr;
 use crate::scope::*;
-use crate::stmt::{Decl, Stmt};
+use crate::stmt::{DeclType, Stmt};
+use crate::{declaration_meta::DeclarationMeta, stmt::Decl};
 
 /// Паралельне виконання графа задач із залежностями (оптимізовано)
 pub fn execute_plan(
@@ -19,13 +19,16 @@ pub fn execute_plan(
     graph: &DiGraph<DeclarationMeta, ()>,
 ) -> Result<Vec<Env>, String> {
     let results: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<usize, Env>>> =
-        Arc::new(Mutex::new(HashMap::default()));
+        Arc::new(Mutex::new(HashMap::with_capacity_and_hasher(
+            10,
+            FxBuildHasher,
+        )));
     let cv = Arc::new(Condvar::new());
 
     thread::scope(|s| {
         for &task_id in order {
             let DeclarationMeta {
-                index: _,
+                // index: _,
                 complexity: _,
                 mut_deps: deps_meta,
                 class: _,
@@ -64,16 +67,21 @@ pub fn execute_plan(
 
                 // Виконання завдання
                 let res_env = if deps_meta.is_empty() {
-                    match &decl {
-                        Decl::Stmt(Stmt::For(var, arr_expr, body)) => {
-                            parallel_for_optimized(var.clone(), arr_expr, body, &env)
-                        }
-                        _ => execute_stmt(&decl, &mut env)
+                    match &decl.v {
+                        DeclType::Stmt(stmt) => match stmt.deref() {
+                            Stmt::For(var, arr_expr, body) => {
+                                parallel_for_optimized(var.clone(), arr_expr, body, &env)
+                            }
+                            _ => execute_stmt(decl, &mut env)
+                                .map_err(|e| format!("Execution error: {}", e))
+                                .map(|_| env),
+                        },
+                        _ => execute_stmt(decl, &mut env)
                             .map_err(|e| format!("Execution error: {}", e))
                             .map(|_| env),
                     }
                 } else {
-                    execute_stmt(&decl, &mut env)
+                    execute_stmt(decl, &mut env)
                         .map_err(|e| format!("Execution error: {}", e))
                         .map(|_| env)
                 };
@@ -99,7 +107,7 @@ pub fn execute_plan(
 fn parallel_for_optimized(
     var: String,
     arr_expr: &Expr,
-    block: &Stmt,
+    block: &Arc<Decl>,
     env: &Env,
 ) -> Result<Env, String> {
     if let Some(Expr::Array(arr)) = arr_expr.eval(&env) {
@@ -107,17 +115,15 @@ fn parallel_for_optimized(
             return Ok(env.clone());
         }
 
-        let body = Decl::Stmt(block.clone());
-
         let results: Vec<Result<Env, String>> = arr
             .par_iter()
             .map(|el| {
                 let mut local_env = env.clone();
-                let mut scope = HashMap::default();
+                let mut scope = env_create_scope();
                 scope.insert(var.clone(), el.clone());
                 env_add_scope(&mut local_env, scope);
 
-                let _ = execute_stmt(&body, &mut local_env)?;
+                let _ = execute_stmt(block, &mut local_env)?;
                 env_remove_scope(&mut local_env);
                 Ok(local_env)
             })

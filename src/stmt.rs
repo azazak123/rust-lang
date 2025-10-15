@@ -3,22 +3,29 @@ use crate::parser::Parser;
 use crate::token::TokenType;
 use std::collections::HashMap;
 use std::default;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Print(Expr),
     Expression(Expr),
     Assign(String, Expr),
-    Block(Vec<Decl>),
-    Condition(Expr, Box<Stmt>, Option<Box<Stmt>>),
-    While(Expr, Box<Stmt>),
-    For(String, Expr, Box<Stmt>),
+    Block(Vec<Arc<Decl>>),
+    Condition(Expr, Arc<Decl>, Option<Arc<Decl>>),
+    While(Expr, Arc<Decl>),
+    For(String, Expr, Arc<Decl>),
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum Decl {
+pub struct Decl {
+    pub v: DeclType,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum DeclType {
     VarDecl(String, Expr, Mutability),
-    Stmt(Stmt),
+    Stmt(Arc<Stmt>),
     #[default]
     None,
 }
@@ -45,6 +52,7 @@ pub struct StmtParser {
     tokens: Vec<TokenType>,
     pos: usize,
     type_env: TypeEnv,
+    last_index: usize,
 }
 
 impl StmtParser {
@@ -53,7 +61,14 @@ impl StmtParser {
             tokens,
             pos: 0,
             type_env: HashMap::new(),
+            last_index: 0,
         }
+    }
+
+    fn get_index(&mut self) -> usize {
+        let index = self.last_index;
+        self.last_index += 1;
+        index
     }
 
     fn peek(&self) -> Option<&TokenType> {
@@ -78,7 +93,7 @@ impl StmtParser {
         }
     }
 
-    pub fn parse(&mut self) -> Option<(Vec<Decl>, TypeEnv)> {
+    pub fn parse(&mut self) -> Option<(Vec<Arc<Decl>>, TypeEnv)> {
         let mut decls = Vec::new();
 
         while self.pos < self.tokens.len() {
@@ -88,7 +103,7 @@ impl StmtParser {
         Some((decls, self.type_env.clone()))
     }
 
-    fn parse_decl(&mut self) -> Option<Decl> {
+    fn parse_decl(&mut self) -> Option<Arc<Decl>> {
         if self.check(&TokenType::Var) {
             self.parse_var_decl()
         } else if self.check(&TokenType::Final) {
@@ -98,7 +113,7 @@ impl StmtParser {
         }
     }
 
-    fn parse_var_decl(&mut self) -> Option<Decl> {
+    fn parse_var_decl(&mut self) -> Option<Arc<Decl>> {
         self.advance(); // consume 'var'
         let TokenType::Identifier(name) = self.advance()? else {
             return None;
@@ -119,10 +134,13 @@ impl StmtParser {
         self.type_env
             .insert(name.clone(), (Mutability::Mutable, Type::Any));
 
-        Some(Decl::VarDecl(name, expr, Mutability::Mutable))
+        Some(Arc::new(Decl {
+            v: DeclType::VarDecl(name, expr, Mutability::Mutable),
+            index: self.get_index(),
+        }))
     }
 
-    fn parse_final_decl(&mut self) -> Option<Decl> {
+    fn parse_final_decl(&mut self) -> Option<Arc<Decl>> {
         self.advance(); // consume 'final'
         let TokenType::Identifier(name) = self.advance()? else {
             return None;
@@ -143,12 +161,19 @@ impl StmtParser {
         self.type_env
             .insert(name.clone(), (Mutability::Immutable, Type::Any));
 
-        Some(Decl::VarDecl(name, expr, Mutability::Immutable))
+        Some(Arc::new(Decl {
+            v: DeclType::VarDecl(name, expr, Mutability::Immutable),
+            index: self.get_index(),
+        }))
     }
 
-    fn parse_stmt_as_decl(&mut self) -> Option<Decl> {
+    fn parse_stmt_as_decl(&mut self) -> Option<Arc<Decl>> {
+        let index = self.get_index();
         let stmt = self.parse_stmt()?;
-        Some(Decl::Stmt(stmt))
+        Some(Arc::new(Decl {
+            v: DeclType::Stmt(Arc::new(stmt)),
+            index,
+        }))
     }
 
     fn parse_stmt(&mut self) -> Option<Stmt> {
@@ -248,16 +273,27 @@ impl StmtParser {
 
         let cond = self.parse_expr_until_brace()?;
 
+        let then_index = self.get_index();
         let then_stmt = self.parse_block()?;
+        let then = Arc::new(Decl {
+            v: DeclType::Stmt(Arc::new(then_stmt)),
+            index: then_index,
+        });
 
-        let else_stmt = if self.check(&TokenType::Else) {
+        let else_decl = if self.check(&TokenType::Else) {
             self.advance();
-            Some(Box::new(self.parse_block()?))
+
+            let else_index = self.get_index();
+
+            Some(Arc::new(Decl {
+                v: DeclType::Stmt(Arc::new(self.parse_block()?)),
+                index: else_index,
+            }))
         } else {
             None
         };
 
-        Some(Stmt::Condition(cond, Box::new(then_stmt), else_stmt))
+        Some(Stmt::Condition(cond, then, else_decl))
     }
 
     fn parse_while(&mut self) -> Option<Stmt> {
@@ -265,9 +301,16 @@ impl StmtParser {
 
         let cond = self.parse_expr_until_brace()?;
 
+        let index = self.get_index();
+
         let body = self.parse_block()?;
 
-        Some(Stmt::While(cond, Box::new(body)))
+        let body = Arc::new(Decl {
+            v: DeclType::Stmt(Arc::new(body)),
+            index,
+        });
+
+        Some(Stmt::While(cond, body))
     }
 
     fn parse_for(&mut self) -> Option<Stmt> {
@@ -284,9 +327,16 @@ impl StmtParser {
 
         let arr = self.parse_expr_until_brace()?;
 
+        let index = self.get_index();
+
         let body = self.parse_block()?;
 
-        Some(Stmt::For(var, arr, Box::new(body)))
+        let body = Arc::new(Decl {
+            v: DeclType::Stmt(Arc::new(body)),
+            index,
+        });
+
+        Some(Stmt::For(var, arr, body))
     }
 
     fn parse_expr_until_semicolon(&mut self) -> Option<Expr> {

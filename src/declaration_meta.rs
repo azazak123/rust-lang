@@ -1,14 +1,14 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use crate::stmt::Decl;
+use crate::stmt::{Decl, DeclType};
 
 #[derive(Clone, Debug, Default)]
 pub struct DeclarationMeta {
-    pub index: usize,
+    // pub index: usize,
     pub complexity: usize,
     pub mut_deps: HashSet<usize>,
     pub class: Class,
-    pub decl: Decl,
+    pub decl: Arc<Decl>,
     pub loops_decls_indexes: Vec<usize>,
 }
 

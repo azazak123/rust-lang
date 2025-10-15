@@ -1,11 +1,13 @@
+use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::expr::Expr;
 
-pub type Env = Vec<HashMap<String, Expr>>;
+pub type Env = Vec<Scope>;
+pub type Scope = HashMap<String, Expr>;
 
 pub fn env_empty() -> Env {
-    Vec::new()
+    Vec::with_capacity(10)
 }
 
 pub fn env_lookup(env: &Env, name: &str) -> Option<Expr> {
@@ -29,7 +31,8 @@ pub fn env_remove_scope(env: &mut Env) {
 
 pub fn env_declare(env: &mut Env, name: String, val: Expr) {
     if env.is_empty() {
-        env.push(HashMap::default());
+        let map = env_create_scope();
+        env.push(map);
     }
 
     let last_index = env.len() - 1;
@@ -51,7 +54,7 @@ pub fn merge_scope((id1, x): (usize, &Env), (id2, y): (usize, &Env)) -> (usize, 
     let mut merged = Vec::with_capacity(max_len);
 
     for i in 0..max_len {
-        let mut map = HashMap::default();
+        let mut map = env_create_scope();
         let scope_x = x.get(i);
         let scope_y = y.get(i);
 
@@ -101,4 +104,8 @@ pub fn create_env(dep_results: Vec<Env>, dep_ids: Vec<usize>) -> Env {
         .unwrap_or(vec![]);
 
     result
+}
+
+pub fn env_create_scope() -> Scope {
+    HashMap::with_capacity_and_hasher(5, FxBuildHasher)
 }
