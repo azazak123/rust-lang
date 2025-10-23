@@ -91,8 +91,8 @@ fn main() {
     // Check if parallel execution is beneficial
     // let use_parallel = decls.len() > 10 || meta.iter().any(|(c, _)| *c > 1);
 
-    // let stat_manager = stat_manager::StatManager::new(graph.node_count());
-    // stat_manager.run();
+    let stat_manager = stat_manager::StatManager::new(graph.node_count());
+    stat_manager.run();
 
     let use_parallel = true;
 

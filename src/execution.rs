@@ -140,8 +140,8 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
     }
     let duration = start.elapsed();
 
-    if duration.as_secs() > 1000 {
-        StatManager::send_data(decl.index, env.clone(), duration);
+    if duration.as_millis() > 100 {
+        StatManager::send_data(decl.index, env_get_all_visible(&env), duration);
     }
 
     Ok(())

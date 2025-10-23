@@ -109,3 +109,15 @@ pub fn create_env(dep_results: Vec<Env>, dep_ids: Vec<usize>) -> Env {
 pub fn env_create_scope() -> Scope {
     HashMap::with_capacity_and_hasher(5, FxBuildHasher)
 }
+
+pub fn env_get_all_visible(env: &Env) -> Scope {
+    let mut visible_vars = env_create_scope();
+
+    // Iterate from the innermost scope (most recent) outwards.
+    for scope in env.iter().rev() {
+        for (name, val) in scope {
+            visible_vars.entry(name.clone()).or_insert(val.clone());
+        }
+    }
+    visible_vars
+}
