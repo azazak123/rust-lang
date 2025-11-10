@@ -113,11 +113,11 @@ impl StatManager {
         use lightgbm3::Dataset;
         use serde_json::json;
 
+        // dbg!(self.stats.keys());
         for (k, v) in &self.stats {
             if v.0.is_empty() {
                 continue;
             }
-            dbg!(v.0.len(), k);
             if v.0.len() > 100 {
                 let dataset = Dataset::from_vec_of_vec(v.0.clone(), v.1.clone(), true).unwrap();
                 let params = json! {
@@ -147,7 +147,7 @@ impl StatManager {
         }
     }
 
-    pub fn predict(id: usize, env: &Scope) -> Option<f32> {
+    pub fn predict(id: usize, env: &Scope) -> Option<Duration> {
         let v = env
             .into_iter()
             .filter_map(|(_, v)| match v {
@@ -160,6 +160,6 @@ impl StatManager {
         let models = MODELS.read();
         let model = models.get(&id)?;
 
-        Some(model.predict(&v))
+        Some(Duration::from_millis(model.predict(&v) as u64))
     }
 }

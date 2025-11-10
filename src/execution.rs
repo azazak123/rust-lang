@@ -140,8 +140,15 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
     }
     let duration = start.elapsed();
 
-    if duration.as_millis() > 100 {
+    // dbg!(decl.index);
+
+    if duration.as_millis() > 20 {
+        // dbg!(decl.index, duration.as_millis());
         StatManager::send_data(decl.index, env_get_all_visible(&env), duration);
+        //let estimated = StatManager::predict(decl.index, &env_get_all_visible(&env));
+        //if let Some(estimated) = estimated {
+        //    dbg!(estimated / duration.as_millis() as f32);
+        // }
     }
 
     Ok(())

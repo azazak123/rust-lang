@@ -5,10 +5,13 @@ mod graph;
 mod parallel_execution;
 mod parser;
 mod scheduler;
+mod scheduler_parallel;
 mod scope;
 mod stat_manager;
 mod stmt;
+mod task_graph;
 mod token;
+mod worker_pool;
 
 use std::env;
 use std::fs;
@@ -18,6 +21,8 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::NodeRef;
 
 fn main() {
+    colog::init();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -59,12 +64,12 @@ fn main() {
 
     let mut graph = graph.map(|_, meta| meta.clone().unwrap(), |_, w| *w);
 
-    // let mut edges = graph
-    //     .edge_references()
-    //     .map(|e| (e.source(), e.target()))
-    //     .collect::<Vec<_>>();
+    let mut edges = graph
+        .edge_references()
+        .map(|e| (e.source(), e.target()))
+        .collect::<Vec<_>>();
 
-    // edges.sort();
+    edges.sort();
 
     // dbg!(edges);
 
@@ -97,8 +102,9 @@ fn main() {
     let use_parallel = true;
 
     if use_parallel {
-        // Execute with parallelization
-        match parallel_execution::execute_plan(&order, &graph) {
+        // parallel_execution::execute_parallel(graph).unwrap();
+        // // Execute with parallelization
+        match parallel_execution::execute_plan(graph, &decls) {
             Ok(_) => {}
             Err(e) => {
                 eprintln!("Parallel execution error: {}", e);

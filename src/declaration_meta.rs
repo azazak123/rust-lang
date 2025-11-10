@@ -10,11 +10,13 @@ pub struct DeclarationMeta {
     pub class: Class,
     pub decl: Arc<Decl>,
     pub loops_decls_indexes: Vec<usize>,
+    pub depth: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub enum Class {
     #[default]
     Ordinary,
     Loop,
+    Block,
 }

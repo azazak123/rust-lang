@@ -1,0 +1,19 @@
+final height = 100;
+final width = 10000;
+final maxIter = 1000;
+for y in [0..height - 1] {
+    final cy = (y - height/2.0) * 4.0 / height;
+    for x in [0..width - 1] {
+        var zx = 0;
+        var zy = 0;
+        final cx = (x - width/2.0) * 4.0 / width;
+        var i = 0;
+        while zx*zx + zy*zy < 4.0 and i < maxIter {
+            final tmp = zx*zx - zy*zy + cx;
+            zy = 2.0*zx*zy + cy;
+            zx = tmp;
+            i = i + 1;
+        }
+    }
+    print y;
+}

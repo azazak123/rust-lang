@@ -3,6 +3,7 @@ use crate::parser::Parser;
 use crate::token::TokenType;
 use std::collections::HashMap;
 use std::default;
+use std::hash::Hash;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,20 @@ pub enum Stmt {
 pub struct Decl {
     pub v: DeclType,
     pub index: usize,
+}
+
+impl PartialEq for Decl {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for Decl {}
+
+impl Hash for Decl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+    }
 }
 
 #[derive(Debug, Clone, Default)]
