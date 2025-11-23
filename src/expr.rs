@@ -1,4 +1,4 @@
-use rustc_hash::{FxBuildHasher, FxHashMap as HashMap};
+use ustr::Ustr;
 
 use crate::scope::*;
 
@@ -8,23 +8,25 @@ pub enum Expr {
     String(String),
     Bool(bool),
     Nil,
-    Var(String),
+    Var(Ustr),
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Array(Vec<Expr>),
     Range(Box<Expr>, Box<Expr>),
-    MapExpr(String, Box<Expr>, Box<Expr>),
-    FilterExpr(String, Box<Expr>, Box<Expr>),
-    ScanlExpr(String, Box<Expr>, String, Box<Expr>, Box<Expr>),
-    FoldlExpr(String, Box<Expr>, String, Box<Expr>, Box<Expr>),
+    MapExpr(Ustr, Box<Expr>, Box<Expr>),
+    FilterExpr(Ustr, Box<Expr>, Box<Expr>),
+    ScanlExpr(Ustr, Box<Expr>, Ustr, Box<Expr>, Box<Expr>),
+    FoldlExpr(Ustr, Box<Expr>, Ustr, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
     Bang,
     Minus,
+    ToString, // <--- 1. Додано новий оператор
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryOp {
     Plus,
@@ -58,6 +60,9 @@ impl Expr {
                 match (op, val) {
                     (UnaryOp::Bang, Expr::Bool(b)) => Some(Expr::Bool(!b)),
                     (UnaryOp::Minus, Expr::Number(n)) => Some(Expr::Number(-n)),
+                    // <--- 2. Реалізація перетворення в строку
+                    // Ми використовуємо pretty_print, щоб формат чисел був правильним (без зайвих .0)
+                    (UnaryOp::ToString, v) => Some(Expr::String(v.pretty_print())),
                     _ => None,
                 }
             }
@@ -83,6 +88,13 @@ impl Expr {
                             BinaryOp::Modulo => Some(Expr::Number(n1 % n2)),
                             _ => None,
                         }
+                    }
+                    // <--- 3. Реалізація додавання строк
+                    (Expr::String(s1), BinaryOp::Plus) => {
+                        let Expr::String(s2) = right.eval(env)? else {
+                            return None;
+                        };
+                        Some(Expr::String(s1 + &s2))
                     }
                     (Expr::Bool(b1), BinaryOp::And) => {
                         if !b1 {
@@ -164,7 +176,7 @@ impl Expr {
                 for val in arr {
                     let mut new_env = env.clone();
                     let mut scope = env_create_scope();
-                    scope.insert(var.clone(), val);
+                    scope.insert(var.precomputed_hash(), val);
                     env_add_scope(&mut new_env, scope);
 
                     results.push(body.eval(&new_env)?);
@@ -182,7 +194,7 @@ impl Expr {
                 for val in arr {
                     let mut new_env = env.clone();
                     let mut scope = env_create_scope();
-                    scope.insert(var.clone(), val.clone());
+                    scope.insert(var.precomputed_hash(), val.clone());
                     env_add_scope(&mut new_env, scope);
 
                     let Expr::Bool(cond) = body.eval(&new_env)? else {
@@ -205,8 +217,8 @@ impl Expr {
                 for val in arr {
                     let mut new_env = env.clone();
                     let mut scope = env_create_scope();
-                    scope.insert(acc_name.clone(), acc);
-                    scope.insert(var.clone(), val);
+                    scope.insert(acc_name.precomputed_hash(), acc);
+                    scope.insert(var.precomputed_hash(), val);
                     env_add_scope(&mut new_env, scope);
 
                     acc = body.eval(&new_env)?;
@@ -225,8 +237,8 @@ impl Expr {
                 for val in arr {
                     let mut new_env = env.clone();
                     let mut scope = env_create_scope();
-                    scope.insert(acc_name.clone(), acc);
-                    scope.insert(var.clone(), val);
+                    scope.insert(acc_name.precomputed_hash(), acc);
+                    scope.insert(var.precomputed_hash(), val);
                     env_add_scope(&mut new_env, scope);
 
                     acc = body.eval(&new_env)?;
@@ -254,13 +266,13 @@ impl Expr {
                 let items: Vec<_> = arr.iter().map(Self::pretty_print).collect();
                 format!("[{}]", items.join(", "))
             }
-            Expr::Var(name) => name.clone(),
+            Expr::Var(name) => name.to_string(),
             _ => format!("{:?}", self),
         }
     }
 
     /// Extract variable names from an expression (simple traversal).
-    pub fn extract_vars(&self) -> Vec<String> {
+    pub fn extract_vars(&self) -> Vec<Ustr> {
         match self {
             Expr::Var(name) => vec![name.clone()],
             Expr::Unary(_, inner) => inner.extract_vars(),

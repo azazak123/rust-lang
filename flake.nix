@@ -45,6 +45,8 @@
               nixfmt-rfc-style
 
               python3
+              python313Packages.matplotlib
+              # python312Packages.numpy
 
               cargo-flamegraph
               hotspot

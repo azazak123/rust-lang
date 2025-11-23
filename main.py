@@ -1,5 +1,5 @@
-height = 100
-width = 10000
+height = 1000
+width = 1000
 max_iter = 1000
 for y in range(height):
     cy = (y - height/2.0) * 4.0 / height
@@ -13,4 +13,5 @@ for y in range(height):
             zy = 2.0*zx*zy + cy
             zx = tmp
             i = i + 1
-    print(y)
+        if i == max_iter:
+            print(str(cx) + " " + str(cy))

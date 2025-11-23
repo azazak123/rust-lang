@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use crate::stmt::{Decl, DeclType};
+use crate::stmt::Decl;
 
 #[derive(Clone, Debug, Default)]
 pub struct DeclarationMeta {

@@ -1,18 +1,18 @@
-use std::{
-    sync::{atomic::AtomicUsize, Arc},
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 
-use parking_lot::Mutex;
+use coarsetime::Duration;
+
+use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 
-use crate::task_graph::{self, Task, TaskGraph};
+use crate::{
+    task_graph::{Task, TaskGraph},
+    ARGS,
+};
 
-const COMPLEXITY_MULTIPLIER: usize = 100; // мікросекунди на одиницю складності
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct WorkerLoad {
-    predicted_finish_time: Instant,
+    assigned_time: Duration,
     assigned_complexity: usize,
     tasks_count: usize,
 }
@@ -20,58 +20,33 @@ struct WorkerLoad {
 impl WorkerLoad {
     fn new() -> Self {
         WorkerLoad {
-            predicted_finish_time: Instant::now(),
+            assigned_time: Duration::from_days(0),
             assigned_complexity: 0,
             tasks_count: 0,
         }
     }
 
     fn add_task(&mut self, complexity: usize, estimated_duration: Option<Duration>) {
-        let task_duration = estimated_duration
-            .unwrap_or_else(|| Duration::from_micros((complexity * COMPLEXITY_MULTIPLIER) as u64));
-
-        let now = Instant::now();
-        if self.predicted_finish_time > now {
-            self.predicted_finish_time += task_duration;
-        } else {
-            self.predicted_finish_time = now + task_duration;
+        if let Some(estimated_duration) = estimated_duration {
+            self.assigned_time += estimated_duration;
         }
 
         self.assigned_complexity += complexity;
         self.tasks_count += 1;
     }
 
-    fn complete_task(&mut self, actual_duration: Duration, complexity: usize) {
+    fn complete_task(&mut self, actual_duration: Option<Duration>, complexity: usize) {
         self.assigned_complexity = self.assigned_complexity.saturating_sub(complexity);
         self.tasks_count = self.tasks_count.saturating_sub(1);
 
-        // Коригуємо predicted_finish_time на основі фактичного часу
-        let now = Instant::now();
-        if self.predicted_finish_time > now {
-            // Якщо виконання було швидше, зменшуємо час
-            let predicted_left = self.predicted_finish_time - now;
-            if actual_duration < predicted_left {
-                self.predicted_finish_time = now + (predicted_left - actual_duration);
-            }
+        if let Some(actual_duration) = actual_duration {
+            self.assigned_time.saturating_sub(actual_duration);
         }
-    }
-
-    fn time_until_free(&self) -> Duration {
-        let now = Instant::now();
-        if self.predicted_finish_time > now {
-            self.predicted_finish_time - now
-        } else {
-            Duration::ZERO
-        }
-    }
-
-    fn is_idle(&self) -> bool {
-        self.tasks_count == 0 && self.predicted_finish_time <= Instant::now()
     }
 }
 
 pub struct Scheduler {
-    worker_loads: Arc<Mutex<Vec<WorkerLoad>>>,
+    worker_loads: Arc<RwLock<Vec<WorkerLoad>>>,
     num_workers: usize,
     last_used: usize,
 }
@@ -79,7 +54,7 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn new(num_workers: usize) -> Self {
         Scheduler {
-            worker_loads: Arc::new(Mutex::new(vec![WorkerLoad::new(); num_workers])),
+            worker_loads: Arc::new(RwLock::new(vec![WorkerLoad::new(); num_workers])),
             num_workers,
             last_used: 0,
         }
@@ -88,10 +63,26 @@ impl Scheduler {
     pub fn schedule(&mut self, task_graph: &TaskGraph) -> Vec<Vec<NodeIndex>> {
         let mut scheduled_tasks = vec![vec![]; self.num_workers];
 
-        // dbg!(task_graph.get_ready_tasks());
+        let mut ready_tasks = task_graph.get_ready_tasks();
 
-        for (id, task) in task_graph.get_ready_tasks() {
-            let worker_id = self.select_worker_with_policy(SchedulingPolicy::LeastLoaded);
+        let use_complexity = false;
+
+        let policy = SchedulingPolicy::LeastLoaded(if use_complexity {
+            Load::Complexity
+        } else {
+            Load::Time
+        });
+
+        ready_tasks.sort_unstable_by(|(_, x1), (_, x2)| {
+            x2.get_estimated_duration()
+                .unwrap()
+                .cmp(&x1.get_estimated_duration().unwrap())
+        });
+
+        ready_tasks.truncate(ARGS.schedule_task_limit);
+
+        for (id, task) in ready_tasks {
+            let worker_id = self.select_worker_with_policy(policy);
 
             self.schedule_task(&task, worker_id);
             scheduled_tasks[worker_id].push(id);
@@ -102,8 +93,8 @@ impl Scheduler {
 
     /// Планує задачу на воркер і оновлює статистику
     fn schedule_task(&self, task: &Task, worker_id: usize) {
-        let mut loads = self.worker_loads.lock();
-        loads[worker_id].add_task(task.complexity, task.estimated_duration);
+        let mut loads = self.worker_loads.write();
+        loads[worker_id].add_task(task.get_complexity(), task.get_estimated_duration());
 
         // debug!(
         //     "Scheduled task {:?} (complexity={}, estimated={:?}) to worker {} (will be free in {:?})",
@@ -116,27 +107,35 @@ impl Scheduler {
     }
 
     /// Повідомляє scheduler про завершення задачі
-    pub fn task_completed(&self, worker_id: usize, actual_duration: Duration, complexity: usize) {
-        let mut loads = self.worker_loads.lock();
+    pub fn task_completed(
+        &self,
+        worker_id: usize,
+        actual_duration: Option<Duration>,
+        complexity: usize,
+    ) {
+        let mut loads = self.worker_loads.write();
         if worker_id < loads.len() {
             loads[worker_id].complete_task(actual_duration, complexity);
         }
     }
 
     /// Знаходить найменш завантажений воркер
-    fn find_least_loaded_worker(&self) -> usize {
-        let loads = self.worker_loads.lock();
+    fn find_least_loaded_worker(&self, load_type: Load) -> usize {
+        let loads = self.worker_loads.read();
         loads
             .iter()
             .enumerate()
-            .min_by_key(|(_, load)| load.predicted_finish_time)
+            .min_by_key(|(_, load)| match load_type {
+                Load::Complexity => load.assigned_complexity,
+                Load::Time => load.assigned_time.as_ticks() as usize,
+            })
             .map(|(id, _)| id)
             .unwrap_or(0)
     }
 
     /// Знаходит воркер з найменшою кількістю задач
     fn find_worker_with_fewest_tasks(&self) -> usize {
-        let loads = self.worker_loads.lock();
+        let loads = self.worker_loads.read();
         loads
             .iter()
             .enumerate()
@@ -145,48 +144,9 @@ impl Scheduler {
             .unwrap_or(0)
     }
 
-    /// Отримує статистику по воркерах
-    fn get_worker_stats(&self) -> Vec<(usize, Duration, usize, usize)> {
-        let loads = self.worker_loads.lock();
-        loads
-            .iter()
-            .enumerate()
-            .map(|(id, load)| {
-                (
-                    id,
-                    load.time_until_free(),
-                    load.assigned_complexity,
-                    load.tasks_count,
-                )
-            })
-            .collect()
-    }
-
-    /// Перевіряє чи всі воркери простоюють
-    fn all_workers_idle(&self) -> bool {
-        let loads = self.worker_loads.lock();
-        loads.iter().all(|load| load.is_idle())
-    }
-
-    /// Час до наступного можливого планування
-    fn next_scheduling_time(&self) -> Duration {
-        let loads = self.worker_loads.lock();
-        let min_finish = loads
-            .iter()
-            .map(|load| load.time_until_free())
-            .min()
-            .unwrap_or(Duration::ZERO);
-
-        if min_finish > Duration::ZERO {
-            min_finish
-        } else {
-            Duration::from_millis(1)
-        }
-    }
-
-    /// Скидає статистику scheduler
+    #[allow(dead_code)]
     fn reset(&self) {
-        let mut loads = self.worker_loads.lock();
+        let mut loads = self.worker_loads.write();
         for load in loads.iter_mut() {
             *load = WorkerLoad::new();
         }
@@ -195,7 +155,7 @@ impl Scheduler {
     /// Стратегія вибору воркера з різними політиками
     fn select_worker_with_policy(&mut self, policy: SchedulingPolicy) -> usize {
         match policy {
-            SchedulingPolicy::LeastLoaded => self.find_least_loaded_worker(),
+            SchedulingPolicy::LeastLoaded(load_type) => self.find_least_loaded_worker(load_type),
             SchedulingPolicy::FewestTasks => self.find_worker_with_fewest_tasks(),
             SchedulingPolicy::RoundRobin => {
                 // Простий round-robin
@@ -207,10 +167,17 @@ impl Scheduler {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum SchedulingPolicy {
-    LeastLoaded, // Вибирає воркер з найменшим predicted_finish_time
-    FewestTasks, // Вибирає воркер з найменшою кількістю задач
-    RoundRobin,  // По черзі
-                 // WorkStealing, // З крадіжкою роботи
+    LeastLoaded(Load), // Вибирає воркер з найменшим predicted_finish_time
+    FewestTasks,       // Вибирає воркер з найменшою кількістю задач
+    RoundRobin,        // По черзі
+                       // WorkStealing, // З крадіжкою роботи
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Load {
+    Time,
+    Complexity,
 }

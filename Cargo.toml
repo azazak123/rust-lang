@@ -10,9 +10,17 @@ parking_lot = "0.12.5"
 rustc-hash = "2.1.1"
 lightgbm3 = "1.0.8"
 serde_json = "1.0.145"
-smartcore = "0.4.5"
+smartcore = "0.4.6"
 log = "0.4.28"
 colog = "1.4.0"
+coarsetime = "0.1.36"
+ustr = "1.1.0"
+nohash-hasher = "0.2"
+clap = { version = "4.5.53", features = ["derive"] }
 
 [profile.release]
-# lto = true
+debug = true      # Потрібно для імен у flamegraph
+opt-level = 3     # Максимальна швидкість
+lto = "fat"       # <--- КЛЮЧОВИЙ МОМЕНТ: Дозволяє інлайнити все в усьому
+codegen-units = 1 # Повільніша компіляція, але краща оптимізація
+strip = false     # Не видаляти символи (іноді потрібно для perf)

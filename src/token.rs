@@ -44,6 +44,7 @@ pub enum TokenType {
     Filter,
     Scanl,
     Foldl,
+    Str, // <--- 1. Додано новий тип токена
 }
 
 pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
@@ -52,6 +53,7 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
 
     while let Some(&ch) = chars.peek() {
         match ch {
+            // ... (пропускаємо символи, дужки, оператори без змін) ...
             ' ' | '\n' | '\r' | '\t' => {
                 chars.next();
             }
@@ -107,7 +109,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                 tokens.push(TokenType::Percent);
                 chars.next();
             }
-
             '.' => {
                 chars.next();
                 if chars.peek() == Some(&'.') {
@@ -117,7 +118,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     tokens.push(TokenType::Dot);
                 }
             }
-
             '!' => {
                 chars.next();
                 if chars.peek() == Some(&'=') {
@@ -127,7 +127,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     tokens.push(TokenType::Bang);
                 }
             }
-
             '=' => {
                 chars.next();
                 if chars.peek() == Some(&'=') {
@@ -137,7 +136,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     tokens.push(TokenType::Equal);
                 }
             }
-
             '<' => {
                 chars.next();
                 if chars.peek() == Some(&'=') {
@@ -147,7 +145,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     tokens.push(TokenType::Less);
                 }
             }
-
             '>' => {
                 chars.next();
                 if chars.peek() == Some(&'=') {
@@ -157,7 +154,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     tokens.push(TokenType::Greater);
                 }
             }
-
             '"' => {
                 chars.next();
                 let mut string = String::new();
@@ -171,7 +167,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                 }
                 tokens.push(TokenType::StringLit(string));
             }
-
             '0'..='9' => {
                 let mut num_str = String::new();
                 while let Some(&c) = chars.peek() {
@@ -192,7 +187,6 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                 }
                 tokens.push(TokenType::Number(num_str.parse().ok()?));
             }
-
             'a'..='z' | 'A'..='Z' | '_' => {
                 let mut ident = String::new();
                 while let Some(&c) = chars.peek() {
@@ -222,6 +216,7 @@ pub fn tokenize(input: &str) -> Option<Vec<TokenType>> {
                     "filter" => TokenType::Filter,
                     "scanl" => TokenType::Scanl,
                     "foldl" => TokenType::Foldl,
+                    "str" => TokenType::Str, // <--- 2. Додано ключове слово "str"
                     _ => TokenType::Identifier(ident),
                 };
                 tokens.push(token);

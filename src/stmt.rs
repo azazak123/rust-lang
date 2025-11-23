@@ -1,8 +1,9 @@
+use ustr::{ustr, Ustr};
+
 use crate::expr::Expr;
 use crate::parser::Parser;
 use crate::token::TokenType;
 use std::collections::HashMap;
-use std::default;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -10,11 +11,11 @@ use std::sync::Arc;
 pub enum Stmt {
     Print(Expr),
     Expression(Expr),
-    Assign(String, Expr),
+    Assign(Ustr, Expr),
     Block(Vec<Arc<Decl>>),
     Condition(Expr, Arc<Decl>, Option<Arc<Decl>>),
     While(Expr, Arc<Decl>),
-    For(String, Expr, Arc<Decl>),
+    For(Ustr, Expr, Arc<Decl>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -39,7 +40,7 @@ impl Hash for Decl {
 
 #[derive(Debug, Clone, Default)]
 pub enum DeclType {
-    VarDecl(String, Expr, Mutability),
+    VarDecl(Ustr, Expr, Mutability),
     Stmt(Arc<Stmt>),
     #[default]
     None,
@@ -53,6 +54,7 @@ pub enum Mutability {
 
 pub type TypeEnv = HashMap<String, (Mutability, Type)>;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
     Number,
@@ -150,7 +152,7 @@ impl StmtParser {
             .insert(name.clone(), (Mutability::Mutable, Type::Any));
 
         Some(Arc::new(Decl {
-            v: DeclType::VarDecl(name, expr, Mutability::Mutable),
+            v: DeclType::VarDecl(ustr(&name), expr, Mutability::Mutable),
             index: self.get_index(),
         }))
     }
@@ -177,7 +179,7 @@ impl StmtParser {
             .insert(name.clone(), (Mutability::Immutable, Type::Any));
 
         Some(Arc::new(Decl {
-            v: DeclType::VarDecl(name, expr, Mutability::Immutable),
+            v: DeclType::VarDecl(ustr(&name), expr, Mutability::Immutable),
             index: self.get_index(),
         }))
     }
@@ -252,7 +254,7 @@ impl StmtParser {
         }
         self.advance();
 
-        Some(Stmt::Assign(name, expr))
+        Some(Stmt::Assign(ustr(&name), expr))
     }
 
     fn parse_expr_stmt(&mut self) -> Option<Stmt> {
@@ -351,7 +353,7 @@ impl StmtParser {
             index,
         });
 
-        Some(Stmt::For(var, arr, body))
+        Some(Stmt::For(ustr(&var), arr, body))
     }
 
     fn parse_expr_until_semicolon(&mut self) -> Option<Expr> {

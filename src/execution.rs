@@ -1,21 +1,26 @@
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Instant;
+
+use coarsetime::Instant;
 
 use crate::expr::Expr;
 use crate::scope::*;
 use crate::stat_manager::StatManager;
 use crate::stmt::{Decl, DeclType, Stmt};
 
-pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
+pub fn execute_stmt<const SAVE_TIME: bool>(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
     // Match the inner DeclType by reference
 
-    let start = Instant::now();
+    let start = if SAVE_TIME {
+        Some((Instant::now(), env_get_all_visible(&env)))
+    } else {
+        None
+    };
     match &decl.v {
         // 1. VARIABLE DECLARATION (No Arc involved here)
         DeclType::VarDecl(name, expr, _mutability) => {
             let val = eval_or_err(expr, env, Some(name))?;
-            env_declare(env, name.clone(), val);
+            env_declare(env, &name, val.into());
         }
 
         // 2. STATEMENT: Match the inner Arc<Stmt>
@@ -31,7 +36,7 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
                 // 2.2. ASSIGNMENT Statement
                 Stmt::Assign(name, expr) => {
                     let val = eval_or_err(expr, env, Some(name))?;
-                    if !env_assign(env, name, val) {
+                    if !env_assign(env, name, val.into()) {
                         return Err(format!(
                             "Error: variable {} not found or is immutable",
                             name
@@ -43,7 +48,7 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
                 Stmt::Block(stmts) => {
                     env_add_scope(env, env_create_scope());
                     for stmt in stmts {
-                        execute_stmt(stmt, env)?;
+                        execute_stmt::<SAVE_TIME>(stmt, env)?;
                     }
                     env_remove_scope(env);
                 }
@@ -58,9 +63,9 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
                     };
 
                     if b {
-                        execute_stmt(then_branch, env)?; // Use helper for Arc<Stmt>
+                        execute_stmt::<false>(then_branch, env)?; // Use helper for Arc<Stmt>
                     } else if let Some(else_branch) = else_branch_opt {
-                        execute_stmt(else_branch, env)?; // Use helper for Arc<Stmt>
+                        execute_stmt::<false>(else_branch, env)?; // Use helper for Arc<Stmt>
                     }
                 }
 
@@ -86,10 +91,10 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
 
                         if let Some(stmts) = stmts {
                             for stmt in stmts {
-                                execute_stmt(stmt, env)?;
+                                execute_stmt::<false>(stmt, env)?;
                             }
                         } else {
-                            execute_stmt(body, env)?;
+                            execute_stmt::<false>(body, env)?;
                         }
                     }
                 }
@@ -109,15 +114,15 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
                         for val in arr {
                             // Create and manage a new scope for each iteration
                             let mut scope = env_create_scope();
-                            scope.insert(var.clone(), val);
+                            scope.insert(var.precomputed_hash(), val.into());
                             env_add_scope(env, scope);
 
                             if let Some(stmts) = stmts {
                                 for stmt in stmts {
-                                    execute_stmt(stmt, env)?;
+                                    execute_stmt::<SAVE_TIME>(stmt, env)?;
                                 }
                             } else {
-                                execute_stmt(body, env)?;
+                                execute_stmt::<SAVE_TIME>(body, env)?;
                             }
 
                             env_remove_scope(env);
@@ -138,17 +143,28 @@ pub fn execute_stmt(decl: &Arc<Decl>, env: &mut Env) -> Result<(), String> {
         // 3. NONE (Should not be reached)
         DeclType::None => unreachable!(),
     }
-    let duration = start.elapsed();
 
-    // dbg!(decl.index);
+    if SAVE_TIME {
+        if let Some((start, all_vissible)) = start {
+            let duration = start.elapsed();
 
-    if duration.as_millis() > 20 {
-        // dbg!(decl.index, duration.as_millis());
-        StatManager::send_data(decl.index, env_get_all_visible(&env), duration);
-        //let estimated = StatManager::predict(decl.index, &env_get_all_visible(&env));
-        //if let Some(estimated) = estimated {
-        //    dbg!(estimated / duration.as_millis() as f32);
-        // }
+            // dbg!(decl.index);
+
+            if duration.as_millis() > 5 {
+                // dbg!(decl.index, duration.as_millis());
+                // let estimated = StatManager::predict(decl.index, &all_vissible);
+
+                StatManager::send_data(decl.index, all_vissible, duration);
+                // if let Some(estimated) = estimated {
+                //     info!(
+                //         "diff estimated duration:{}, estimated: {}, duration: {}",
+                //         estimated.as_millis().abs_diff(duration.as_millis()),
+                //         estimated.as_millis(),
+                //         duration.as_millis()
+                //     );
+                // }
+            }
+        }
     }
 
     Ok(())
@@ -169,7 +185,7 @@ fn eval_or_err(expr: &Expr, env: &Env, name: Option<&str>) -> Result<Expr, Strin
 pub fn execute(decls: &[Arc<Decl>]) -> Result<(), String> {
     let mut env = env_empty();
     for decl in decls {
-        execute_stmt(decl, &mut env)?;
+        execute_stmt::<false>(decl, &mut env)?;
     }
     Ok(())
 }

@@ -1,16 +1,17 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         LazyLock, OnceLock,
     },
     thread,
-    time::Duration,
 };
+
+use coarsetime::Duration;
 
 use parking_lot::RwLock;
 
-use crate::{expr::Expr, scope::Scope};
+use crate::expr::Expr;
 
 use smartcore::{
     self,
@@ -30,14 +31,23 @@ enum Model {
 
 impl Model {
     pub fn predict(&self, args: &[f64]) -> f32 {
-        match self {
+        // Прогноз повертається в логарифмічній шкалі ln(ms + 1)
+        let log_prediction = match self {
             Model::LGBM(Booster(model)) => {
+                // dbg!("Using LGBM model for prediction");
                 model.predict(args, args.len() as i32, true).unwrap()[0] as f32
             }
-            Model::L2(ridge_regression) => ridge_regression
-                .predict(&DenseMatrix::from_2d_array(&[args]).unwrap())
-                .unwrap()[0] as f32,
-        }
+            Model::L2(ridge_regression) => {
+                // dbg!("Using Ridge Regression model for prediction");
+                ridge_regression
+                    .predict(&DenseMatrix::from_2d_array(&[args]).unwrap())
+                    .unwrap()[0] as f32
+            }
+        };
+
+        // Відновлюємо час: e^y - 1
+        // .max(0.0) гарантує, що ми не повернемо від'ємний час через шуми моделі
+        (log_prediction.exp() - 1.0).max(0.0)
     }
 }
 
@@ -52,7 +62,7 @@ fn init_channel() -> Receiver<MessageType> {
 }
 
 pub enum MessageType {
-    AddEntries((usize, Scope, Duration)),
+    AddEntries((usize, BTreeMap<u64, Expr>, Duration)),
 }
 
 pub struct StatManager {
@@ -73,7 +83,7 @@ impl StatManager {
         thread::spawn(move || self.inner());
     }
 
-    pub fn send_data(n: usize, scope: Scope, time: Duration) {
+    pub fn send_data(n: usize, scope: BTreeMap<u64, Expr>, time: Duration) {
         if let Some(tx) = STAT_MANAGER_TX.get() {
             tx.send(MessageType::AddEntries((n, scope, time))).unwrap();
         }
@@ -81,22 +91,28 @@ impl StatManager {
 
     fn inner(&mut self) {
         loop {
-            match self.rx.recv_timeout(Duration::from_millis(500)) {
+            match self.rx.recv_timeout(std::time::Duration::from_millis(500)) {
                 Ok(MessageType::AddEntries((n, env, time))) => {
                     let e = self.stats.entry(n).or_insert((vec![], vec![]));
 
-                    let v = env
-                        .into_iter()
+                    let mut v: Vec<_> = env
+                        .iter()
                         .filter_map(|(_, v)| match v {
-                            Expr::Number(n) => Some(n),
-                            Expr::Bool(b) => Some(b as u8 as f64),
+                            Expr::Number(n) => Some(*n),
+                            Expr::Bool(b) => Some(*b as u8 as f64),
                             _ => None,
                         })
                         .collect();
 
+                    if v.is_empty() {
+                        v.push(1.0);
+                    }
+
                     e.0.push(v);
 
                     e.1.push(time.as_millis() as f32);
+
+                    self.process();
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     self.process();
@@ -118,44 +134,66 @@ impl StatManager {
             if v.0.is_empty() {
                 continue;
             }
+
+            // КРОК 1: Уніфікована підготовка даних (Log1p Transform)
+            // Використовуємо ln(x + 1), щоб уникнути -inf для 0ms
+            let log_targets: Vec<f32> = v.1.iter().map(|&t| (t + 1.0).ln()).collect();
+
+            // Якщо даних мало, Ridge теж має вчитися на логарифмах!
             if v.0.len() > 100 {
-                let dataset = Dataset::from_vec_of_vec(v.0.clone(), v.1.clone(), true).unwrap();
+                let dataset = Dataset::from_vec_of_vec(v.0.clone(), log_targets, true).unwrap();
                 let params = json! {
                     {
-                        "num_iterations":10,
-                        "verbose":0,
-                        "learning_rate": 0.5,
-                        "objective": "regression"
+                        "objective": "regression_l2", // L2 стабільніша з логарифмом
+                        "verbose": -1,
+                        "learning_rate": 0.05,
+                        "num_iterations": 100,
+                        "max_depth": 3,
+                        "num_leaves": 15,
+                        "min_data_in_leaf": 2,
+                        "bagging_fraction": 1.0,
+                        "feature_fraction": 1.0, // Вимкніть семплінг колонок на малих даних
                     }
                 };
-                let bst = lightgbm3::Booster::train(dataset, &params).unwrap();
-                let mut models = MODELS.write();
-                models.insert(*k, Model::LGBM(Booster(bst)));
+                // Додаємо обробку помилок, щоб не падало
+                if let Ok(bst) = lightgbm3::Booster::train(dataset, &params) {
+                    let mut models = MODELS.write();
+                    models.insert(*k, Model::LGBM(Booster(bst)));
+                }
             } else if v.0.len() > v.0[0].len() {
+                // Ridge Regression тепер теж вчиться на log_targets
                 let m = DenseMatrix::from_2d_vec(&v.0).unwrap();
-                let model = RidgeRegression::fit(
+                // Alpha (регуляризація) має бути меншою для логарифмічних даних (наприклад 0.1 - 1.0)
+                if let Ok(model) = RidgeRegression::fit(
                     &m,
-                    &v.1,
+                    &log_targets,
                     RidgeRegressionParameters::default()
-                        .with_normalize(false)
-                        .with_alpha(0.7),
-                )
-                .unwrap();
-                let mut models = MODELS.write();
-                models.insert(*k, Model::L2(model));
+                        .with_normalize(true) // Бажано нормалізувати вхідні фічі
+                        .with_alpha(0.5),
+                ) {
+                    let mut models = MODELS.write();
+                    models.insert(*k, Model::L2(model));
+                }
             }
         }
     }
 
-    pub fn predict(id: usize, env: &Scope) -> Option<Duration> {
-        let v = env
-            .into_iter()
+    pub fn predict(id: usize, env: &BTreeMap<u64, Expr>) -> Option<Duration> {
+        let mut v = env
+            .iter()
             .filter_map(|(_, v)| match v {
                 Expr::Number(n) => Some(*n),
                 Expr::Bool(b) => Some(*b as u8 as f64),
                 _ => None,
             })
             .collect::<Vec<_>>();
+
+        // ВАЖЛИВО: Повторюємо логіку з inner().
+        // Якщо змінних немає, модель все одно очікує bias-терм (1.0),
+        // на якому вона тренувалася.
+        if v.is_empty() {
+            v.push(1.0);
+        }
 
         let models = MODELS.read();
         let model = models.get(&id)?;

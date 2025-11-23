@@ -3,15 +3,13 @@ use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::declaration_meta::{Class, DeclarationMeta};
-use crate::stmt::{DeclType, Stmt};
 
+#[allow(dead_code)]
 pub fn kahn_topsort(graph: &mut DiGraph<DeclarationMeta, ()>) -> Result<Vec<usize>, Vec<usize>> {
     let mut in_degree: HashMap<usize, usize> = HashMap::new();
     let mut result = Vec::new();
 
     let mut blacklisted = HashSet::new();
-
-    // let g_clone = graph.clone();
 
     for edge in graph.edge_references() {
         let target = edge.target();

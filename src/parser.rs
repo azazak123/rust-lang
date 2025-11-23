@@ -1,6 +1,7 @@
 // src/parser.rs
 use crate::expr::{BinaryOp, Expr, UnaryOp};
 use crate::token::TokenType;
+use ustr::ustr;
 
 pub struct Parser {
     tokens: Vec<TokenType>,
@@ -142,10 +143,16 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Option<Expr> {
-        if matches!(self.peek(), Some(TokenType::Bang) | Some(TokenType::Minus)) {
+        // --- ЗМІНИ ТУТ ---
+        // Додано перевірку на TokenType::Str
+        if matches!(
+            self.peek(),
+            Some(TokenType::Bang) | Some(TokenType::Minus) | Some(TokenType::Str)
+        ) {
             let op = match self.advance()? {
                 TokenType::Bang => UnaryOp::Bang,
                 TokenType::Minus => UnaryOp::Minus,
+                TokenType::Str => UnaryOp::ToString, // Мапінг токена в операцію
                 _ => return None,
             };
             let expr = self.parse_unary()?;
@@ -182,7 +189,7 @@ impl Parser {
             TokenType::Identifier(name) => {
                 let name = name.clone();
                 self.advance();
-                Some(Expr::Var(name))
+                Some(Expr::Var(ustr(&name)))
             }
             TokenType::LeftParen => {
                 self.advance();
@@ -274,7 +281,7 @@ impl Parser {
         }
         self.advance();
 
-        Some(Expr::MapExpr(var, Box::new(arr), Box::new(body)))
+        Some(Expr::MapExpr(ustr(&var), Box::new(arr), Box::new(body)))
     }
 
     fn parse_filter(&mut self) -> Option<Expr> {
@@ -300,7 +307,7 @@ impl Parser {
         }
         self.advance();
 
-        Some(Expr::FilterExpr(var, Box::new(arr), Box::new(body)))
+        Some(Expr::FilterExpr(ustr(&var), Box::new(arr), Box::new(body)))
     }
 
     fn parse_scanl(&mut self) -> Option<Expr> {
@@ -342,9 +349,9 @@ impl Parser {
         self.advance();
 
         Some(Expr::ScanlExpr(
-            acc_name,
+            ustr(&acc_name),
             Box::new(init),
-            var,
+            ustr(&var),
             Box::new(arr),
             Box::new(body),
         ))
@@ -389,9 +396,9 @@ impl Parser {
         self.advance();
 
         Some(Expr::FoldlExpr(
-            acc_name,
+            ustr(&acc_name),
             Box::new(init),
-            var,
+            ustr(&var),
             Box::new(arr),
             Box::new(body),
         ))

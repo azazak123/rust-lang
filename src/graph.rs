@@ -2,7 +2,7 @@ use petgraph::{
     graph::{DiGraph, NodeIndex},
     visit::EdgeRef,
 };
-use serde_json::de;
+
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},
@@ -302,6 +302,7 @@ fn add_stmt(
 
                 // 2.3. BLOCK Statement
                 Stmt::Block(stmts) => {
+                    // dbg!(decl.index);
                     let meta = DeclarationMeta {
                         complexity: 0,
                         mut_deps: HashSet::new(),
@@ -321,13 +322,29 @@ fn add_stmt(
 
                     let scope_after = env_remove_scope(scope_after_block);
 
+                    // dbg!(index_after_block);
+                    let mut sum = 0;
                     for n in decl.index + 1..=index_after_block {
+                        if let Some(n_meta) = &g2[NodeIndex::new(n)] {
+                            sum += n_meta.complexity;
+                        }
+
                         g2[NodeIndex::new(decl.index)]
                             .as_mut()
                             .unwrap()
                             .loops_decls_indexes
                             .push(n);
+                        let inner_deps = g2
+                            .neighbors_directed(NodeIndex::new(n), petgraph::Direction::Incoming)
+                            .collect::<Vec<_>>();
+                        for source in inner_deps {
+                            if source.index() < decl.index {
+                                g2.update_edge(source, NodeIndex::new(decl.index), ());
+                            }
+                        }
                     }
+
+                    g2[NodeIndex::new(decl.index)].as_mut().unwrap().complexity = sum;
 
                     //     let inner_deps = g2
                     //         .neighbors_directed(NodeIndex::new(n), petgraph::Direction::Incoming)
@@ -344,6 +361,7 @@ fn add_stmt(
 
                 // 2.4. CONDITION Statement (Then/Else - Arc<Stmt>)
                 Stmt::Condition(cond, then_block, maybe_else) => {
+                    // dbg!(decl.index);
                     let deps = cond.extract_vars();
                     let indexes: Vec<(usize, Mutability)> =
                         deps.iter().filter_map(|d| env_lookup(&scope, d)).collect();
@@ -375,6 +393,13 @@ fn add_stmt(
                         depth + 1,
                     );
 
+                    let mut than_complexity = 0;
+                    for n in decl.index + 1..=i_after_than {
+                        if let Some(n_meta) = &g_then[NodeIndex::new(n)] {
+                            than_complexity += n_meta.complexity;
+                        }
+                    }
+
                     // --- Аналіз гілки ELSE ---
                     let (g_else, scope_else_after, i_after_block) =
                         if let Some(else_stmt) = maybe_else {
@@ -400,11 +425,35 @@ fn add_stmt(
                     let next_scope = env_remove_scope(clamped);
 
                     let mut next_graph = g_else;
-                    redirect_edges_to_target(&mut next_graph, decl.index);
-                    next_graph.retain_edges(|g, e| {
-                        let edge = g.edge_endpoints(e).unwrap();
-                        edge.0 != edge.1
-                    });
+
+                    let mut else_complexity = 0;
+                    // Виправлено: від початку ELSE блоку до його кінця
+                    for n in i_after_than + 1..=i_after_block {
+                        if let Some(n_meta) = &next_graph[NodeIndex::new(n)] {
+                            else_complexity += n_meta.complexity;
+                        }
+                    }
+
+                    for n in decl.index + 1..=i_after_block {
+                        next_graph[NodeIndex::new(decl.index)]
+                            .as_mut()
+                            .unwrap()
+                            .loops_decls_indexes
+                            .push(n);
+                        let inner_deps = next_graph
+                            .neighbors_directed(NodeIndex::new(n), petgraph::Direction::Incoming)
+                            .collect::<Vec<_>>();
+                        for source in inner_deps {
+                            if source.index() < decl.index {
+                                next_graph.update_edge(source, NodeIndex::new(decl.index), ());
+                            }
+                        }
+                    }
+
+                    next_graph[NodeIndex::new(decl.index)]
+                        .as_mut()
+                        .unwrap()
+                        .complexity = than_complexity.max(else_complexity);
 
                     (next_graph, next_scope, i_after_block)
                 }
@@ -495,6 +544,14 @@ fn add_stmt(
                     }
 
                     let next_scope = env_remove_scope(scope_after_block);
+
+                    if let Some(n_meta) = &next_graph[NodeIndex::new(initial_index + 1)] {
+                        next_graph[NodeIndex::new(decl.index)]
+                            .as_mut()
+                            .unwrap()
+                            .complexity += n_meta.complexity;
+                    }
+
                     (next_graph, next_scope, index_after_block)
                 }
 
@@ -531,11 +588,19 @@ fn add_stmt(
 
                     let block_stmts = &[Arc::clone(block)];
 
-                    let (g_block, scope_after_block, _) =
-                        analyze_rec(s_with_loopvar.clone(), graph.clone(), block_stmts, depth + 1);
+                    let (g_block, scope_after_block, _) = analyze_rec(
+                        s_with_loopvar.clone(),
+                        graph.clone(),
+                        block_stmts,
+                        depth + 1,
+                    );
 
-                    let (mut g_block2, scope_after_block, index_after_block) =
-                        analyze_rec(scope_after_block.clone(), graph.clone(), block_stmts, depth + 1);
+                    let (mut g_block2, scope_after_block, index_after_block) = analyze_rec(
+                        scope_after_block.clone(),
+                        graph.clone(),
+                        block_stmts,
+                        depth + 1,
+                    );
 
                     let next_scope = env_remove_scope(scope_after_block);
 
@@ -566,6 +631,13 @@ fn add_stmt(
                         // );
                     }
 
+                    if let Some(n_meta) = &next_graph[NodeIndex::new(initial_index + 1)] {
+                        next_graph[NodeIndex::new(decl.index)]
+                            .as_mut()
+                            .unwrap()
+                            .complexity += n_meta.complexity;
+                    }
+
                     (next_graph, next_scope, index_after_block)
                 }
 
@@ -587,7 +659,7 @@ fn add_stmt(
                         class: Class::Ordinary,
                         decl: decl.clone(),
                         loops_decls_indexes: vec![],
-                        depth
+                        depth,
                     };
 
                     update_node(&mut graph, meta);
@@ -611,40 +683,6 @@ fn apply_min_index_to_scope(scope: &Scope, idx: usize) -> Scope {
                 .collect::<HashMap<Variable, (usize, Mutability)>>()
         })
         .collect::<Scope>()
-}
-
-fn redirect_edges_to_target(graph: &mut Graph, target_index: usize) {
-    let target = NodeIndex::new(target_index);
-
-    // 1️⃣ Збираємо ребра, які треба перенаправити (не можна змінювати граф під час ітерації!)
-    let edges_to_redirect: Vec<(NodeIndex, NodeIndex)> = graph
-        .edge_indices()
-        .filter_map(|eidx| {
-            let (src, dst) = graph.edge_endpoints(eidx)?;
-            if dst.index() > target_index || src.index() > target_index {
-                Some((src, dst))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // 2️⃣ Видаляємо старі ребра
-    for (src, dst) in &edges_to_redirect {
-        if let Some(eidx) = graph.find_edge(*src, *dst) {
-            graph.remove_edge(eidx);
-        }
-    }
-
-    // 3️⃣ Додаємо нові ребра → target
-    for (src, dst) in &edges_to_redirect {
-        graph.remove_node(*dst);
-        if *src < target {
-            graph.update_edge(*src, target, ());
-        } else if *src > target {
-            graph.remove_node(*src);
-        }
-    }
 }
 
 // use petgraph::{
