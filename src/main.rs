@@ -21,27 +21,35 @@ use clap::Parser;
 const ARGS: LazyLock<Args> = LazyLock::new(|| Args::parse());
 
 #[derive(Parser)]
+#[command(author, version, about = "Parallel script execution engine with adaptive scheduling", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = 100)]
+    /// Maximum number of tasks to schedule per scheduling round
+    #[arg(short = 'l', long, default_value_t = 100)]
     schedule_task_limit: usize,
 
-    #[arg(short, long, default_value_t = 400)]
-    duration_to_par_ms: u64,
+    /// Minimum estimated duration (in ms) for a block to be executed in parallel
+    #[arg(short = 'b', long, default_value_t = 400)]
+    min_block_duration_ms: u64,
 
-    #[arg(short, long, default_value_t = 100)]
-    duration_to_par_loop_iter_ms: u64,
+    /// Minimum estimated duration per iteration (in ms) for a loop to be parallelized
+    #[arg(short = 'i', long, default_value_t = 100)]
+    min_loop_iter_duration_ms: u64,
 
+    /// Disable parallel execution and run sequentially
+    #[arg(short = 'S', long)]
+    sequential: bool,
+
+    /// Number of worker threads (defaults to number of CPU cores)
+    #[arg(short = 'w', long)]
+    workers: Option<usize>,
+
+    /// Disable statistical performance prediction and machine learning
+    #[arg(short = 'M', long)]
+    disable_ml_predictor: bool,
+
+    /// Path to the script file to execute
     #[arg(short, long)]
-    no_par: bool,
-
-    #[arg(short, long)]
-    n_workers: Option<usize>,
-
-    #[arg(short, long)]
-    no_use_stat_manager: bool,
-
-    #[arg(short, long)]
-    script: String,
+    file: String,
 }
 
 fn main() {
@@ -54,7 +62,7 @@ fn main() {
     //     std::process::exit(1);
     // }
 
-    let source = match fs::read_to_string(&ARGS.script) {
+    let source = match fs::read_to_string(&ARGS.file) {
         Ok(content) => content,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
@@ -86,8 +94,8 @@ fn main() {
 
     let graph = graph.map(|_, meta| meta.clone().unwrap(), |_, w| *w);
 
-    if !ARGS.no_par {
-        if ARGS.no_use_stat_manager {
+    if !ARGS.sequential {
+        if ARGS.disable_ml_predictor {
             let stat_manager = stat_manager::StatManager::new(graph.node_count());
             stat_manager.run();
         }

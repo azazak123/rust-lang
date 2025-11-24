@@ -181,7 +181,7 @@ impl WorkerPool {
 
                 if estinated_time.is_some_and(|x| {
                     (x / elements.len() as u32)
-                        < Duration::from_millis(ARGS.duration_to_par_loop_iter_ms)
+                        < Duration::from_millis(ARGS.min_loop_iter_duration_ms)
                 }) {
                     execute_stmt::<true>(&body, &mut env).unwrap();
                 } else {

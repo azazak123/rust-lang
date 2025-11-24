@@ -35,7 +35,7 @@ pub struct Executor {
 impl Executor {
     pub fn new(graph: DiGraph<DeclarationMeta, ()>, decls: &[Arc<Decl>]) -> Self {
         let num_workers = ARGS
-            .n_workers
+            .workers
             .unwrap_or_else(|| thread::available_parallelism().map_or(1, |n| n.get()));
 
         Executor {
@@ -66,7 +66,7 @@ impl Executor {
 
     pub fn is_parallel_execution(duration: Option<Duration>, depth: usize) -> bool {
         duration.map_or(depth <= 1, |x| {
-            x >= Duration::from_millis(ARGS.duration_to_par_ms)
+            x >= Duration::from_millis(ARGS.min_block_duration_ms)
         })
     }
 
